@@ -1,0 +1,190 @@
+﻿<#@ template debug="false" hostspecific="true" language="C#" #>
+<#@ output extension=".cs" #>
+
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Data" #>
+<#@ assembly name="System.xml" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Data.SqlClient" #>
+<#@ import namespace="System.Data" #>
+
+<#
+	
+    var procedures = CommonHelper.GetStoreProcedure();
+    foreach(var spName in procedures)
+    {
+        var parameters = CommonHelper.GetStoreProcedureParameters(spName);
+		var className = spName;
+        var folderName = spName;
+        #>
+using System;
+namespace <#=Config.NameSpace#>.<#= spName #>
+{
+    public class <#= spName #>
+    {
+        <# 
+                foreach(var parameter in parameters)
+                {
+                    var propertyName = parameter.ParameterName;
+                    var CLRType = CommonHelper.CLRTypeMapping[parameter.DataType];
+                    #>
+        public <#= CLRType #> <#= propertyName #> { get; set; }
+                    <#
+                }
+            #>
+    }
+}
+<#
+
+
+        string currPath = Path.GetDirectoryName(Host.TemplateFile);
+        string folderPath = Path.Combine(currPath,folderName);
+        if(!Directory.Exists(folderPath))
+        {
+          Directory.CreateDirectory(folderPath);
+        }
+        string relativeOutputFilePath = folderName + "//" + className + ".cs";
+        string outputFilePath = Path.Combine(currPath, relativeOutputFilePath);
+        CommonHelper.WriteTemplateOutputToFile(outputFilePath, GenerationEnvironment);
+    }
+#>
+
+
+
+
+
+
+<#+	public static class CommonHelper
+    {
+        /// <summary>
+        /// 取得.net framework 的CLR類別對應
+        /// </summary>
+        /// <param name="name"></param>
+        /// <returns></returns>
+        public static Dictionary<string, string> CLRTypeMapping = new Dictionary<string, string>
+        {
+            { "bit", "bool" },
+            { "tinyint", "byte"},
+            { "int", "int"},
+            { "bigint", "long"},
+            { "smallmoney", "decimal"},
+            { "money", "decimal"},
+            { "decimal", "decimal"},
+            { "numeric", "decimal"},
+            { "real", "Single"},
+            { "float", "double"},
+            { "char", "string"},
+            { "nchar", "string"},
+            { "varchar", "string"},
+            { "nvarchar", "string"},
+            { "text", "string"},
+            { "ntext", "string"},
+            { "xml", "XElement"},
+            { "smalldatetime", "DateTime"},
+            { "datetime", "DateTime"},
+            { "datetime2", "DateTime"},
+            { "datetimeoffset", "DateTimeOffset"},
+            { "date", "DateTime"},
+            { "time", "TimeSpan" },
+            { "uniqueidentifier", "Guid" }
+        };
+
+        /// <summary>
+        /// 取得所有的Store Procedure
+        /// </summary>
+        /// <returns><see cref="List{T}"/></returns>
+        public static List<string> GetStoreProcedure(string[] exclude = null)
+        {
+			var excludeSQL = "''";
+			if(exclude != null)
+            {
+				excludeSQL = string.Join(",",exclude.Select(item => "'" + item + "'"));
+            }
+
+            var result = new List<string>();
+            using (var conn = new SqlConnection(Config.ConnectionString))
+            {
+                var sql = string.Format(@"SELECT SPECIFIC_NAME
+                    FROM INFORMATION_SCHEMA.ROUTINES
+                    WHERE ROUTINE_TYPE = 'PROCEDURE' AND
+                    SPECIFIC_NAME NOT IN ({0})", string.Join(",",excludeSQL));
+				
+                var sqlcmd = new SqlCommand(sql, conn);
+                conn.Open();
+                var reader = sqlcmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    result.Add(reader["SPECIFIC_NAME"].ToString());
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 取得StoreProcedure參數
+        /// </summary>
+        /// <param name="spName">sp名稱</param>
+        /// <returns><see cref="List{T}"/></returns>
+        public static List<StoreProcedureParameter> GetStoreProcedureParameters(string spName)
+        {
+            var result = new List<StoreProcedureParameter>();
+            using (var conn = new SqlConnection(Config.ConnectionString))
+            {
+                var sql = string.Format(@"SELECT SPECIFIC_NAME,
+                    PARAMETER_NAME,DATA_TYPE,CHARACTER_MAXIMUM_LENGTH
+                    FROM INFORMATION_SCHEMA.PARAMETERS
+                    WHERE SPECIFIC_NAME = '{0}'", spName);
+                var sqlCommad = new SqlCommand(sql, conn);
+                conn.Open();
+
+                var reader = sqlCommad.ExecuteReader();
+                while (reader.Read())
+                {
+                    result.Add(new StoreProcedureParameter
+                    {
+                        SpecificName = reader["SPECIFIC_NAME"].ToString(),
+                        ParameterName = reader["PARAMETER_NAME"].ToString().Remove(0,1),
+                        DataType = reader["DATA_TYPE"].ToString(),
+                        CharacterMaximumLength = reader["CHARACTER_MAXIMUM_LENGTH"].ToString()
+                    });
+                }
+            }
+            return result;
+        }
+
+		public static void WriteTemplateOutputToFile(string outputFilePath,System.Text.StringBuilder genEnvironment)
+        {
+            System.IO.File.WriteAllText(outputFilePath, genEnvironment.ToString());
+            genEnvironment.Clear();
+        }   
+    }
+		#>
+
+<#+ public class StoreProcedureParameter
+    {
+        public string SpecificName { get; set; }
+
+        public string ParameterName { get; set; }
+
+        public string DataType { get; set; }
+
+        public string CharacterMaximumLength { get; set; }
+    }
+#>
+
+<#+ public static class Config
+	{
+		public static string Server = ".";
+
+		public static string Source = "Test";
+
+		public static string NameSpace = "Test";
+
+		public static string ConnectionString = string.Format("Data Source={0};Initial Catalog={1};Integrated Security=True;",Config.Server,Config.Source);
+    }
+#>
